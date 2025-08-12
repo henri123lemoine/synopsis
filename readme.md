@@ -32,8 +32,9 @@ synopsis # copy every file listed in `.llm_info`, wrapped in code blocks, to
 synopsis --edit # interactively add and remove files from `.llm_info`
 
 # by default, the interactive selector shows only git-tracked files and hides
-# ignored/untracked files (e.g., __pycache__, build artifacts). Use --all to
-# include everything.
+# ignored/untracked files (e.g., __pycache__, build artifacts), as well as any
+# files matching patterns from global/per-project hidden config (see below).
+# Use --all to include everything.
 synopsis --edit --all
 ```
 
@@ -60,6 +61,22 @@ file 2 contents
 
 etc.
 ````
+
+## Hidden files
+
+The selector hides files matching glob patterns from `~/.synopsis_hidden`.
+Lines starting with `#` are comments; blank lines are ignored.
+
+```sh
+# create once in your home directory
+cat > ~/.synopsis_hidden << 'EOF'
+**/__pycache__/**
+node_modules/**
+dist/**
+build/**
+*.log
+EOF
+```
 
 ## Possible Future Plans
 

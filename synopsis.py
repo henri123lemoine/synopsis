@@ -6,7 +6,8 @@ import argparse
 import platform
 import subprocess
 from pathlib import Path
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, Set, List
+from fnmatch import fnmatch
 
 try:
     import curses
@@ -213,6 +214,7 @@ args = parser.parse_args()
 
 llm_info_path = ".llm_info"
 directory = os.getcwd()
+HIDDEN_CONFIG_FILENAME = ".synopsis_hidden"
 
 # First, read the .llm_info file
 if os.path.exists(llm_info_path):
@@ -258,17 +260,79 @@ def get_git_allowed_file_set() -> Optional[Set[str]]:
     except Exception:
         return None
 
-_allowed_set = get_git_allowed_file_set()
+def read_hidden_patterns() -> List[str]:
+    """Read patterns from `~/.synopsis_hidden` (global default).
+
+    Works the same regardless of current working directory. Returns empty list
+    if absent or --all is used. Lines beginning with # are comments; blank lines
+    are ignored.
+    """
+    if args.all:
+        return []
+    try:
+        home_file = Path.home() / ".synopsis_hidden"
+        with open(home_file, "r", encoding="utf-8") as f:
+            return [
+                line.strip()
+                for line in f
+                if line.strip() and not line.strip().startswith("#")
+            ]
+    except FileNotFoundError:
+        return []
+    except Exception:
+        return []
+
+def is_hidden_by_patterns(path: str, patterns: List[str]) -> bool:
+    """Return True if the given path matches any hidden pattern.
+
+    Both the full relative path and the basename are matched with glob patterns.
+    """
+    if not patterns:
+        return False
+    normalized = path.replace(os.sep, "/").lstrip("./")
+    basename = os.path.basename(normalized)
+    return any(fnmatch(normalized, pat) or fnmatch(basename, pat) for pat in patterns)
+
+def get_all_files_relative_to_root(root: str) -> Set[str]:
+    """Return set of all file paths relative to root directory."""
+    root_path = Path(root)
+    result: Set[str] = set()
+    for item in root_path.rglob("*"):
+        if item.is_file():
+            rel = str(item)[len(root) + 1:]
+            result.add(rel)
+    return result
+
+def apply_hidden_filter(file_set: Set[str], patterns: List[str]) -> Set[str]:
+    if not patterns:
+        return file_set
+    return {p for p in file_set if not is_hidden_by_patterns(p, patterns)}
+
+hidden_patterns = read_hidden_patterns()
+
+_raw_allowed_set = get_git_allowed_file_set()
+
+# Compute the effective allowed set used by the selector. When --all is provided,
+# no filtering is applied (effective set is None → show everything). Otherwise,
+# use git-allowed files if available; if not, enumerate all files. Then apply the
+# user-configured hidden patterns.
+if args.all:
+    _effective_allowed_set: Optional[Set[str]] = None
+else:
+    if _raw_allowed_set is None:
+        _effective_allowed_set = apply_hidden_filter(get_all_files_relative_to_root(directory), hidden_patterns)
+    else:
+        _effective_allowed_set = apply_hidden_filter(_raw_allowed_set, hidden_patterns)
 
 # If a .llm_info exists, filter out any entries that are ignored when filtering is active
-# by keeping only allowed files (tracked or untracked-not-ignored).
-if _allowed_set is not None and selected_files:
-    selected_files = {p for p in selected_files if p in _allowed_set}
+# by keeping only allowed files and removing hidden ones, unless --all is used.
+if _effective_allowed_set is not None and selected_files:
+    selected_files = {p for p in selected_files if p in _effective_allowed_set}
 
 # If .llm_info does not exist, or is empty after filtering, or --edit is specified - run interactive selection.
 if len(selected_files) == 0 or args.edit:
 
-    root = Dir(os.path.basename(directory), "", None, _allowed_set)
+    root = Dir(os.path.basename(directory), "", None, _effective_allowed_set)
     root.expanded = True
 
     selected_files = curses.wrapper(lambda stdscr: interactive_selector(stdscr, root))
