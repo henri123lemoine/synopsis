@@ -34,15 +34,27 @@ class Node:
 class Dir(Node):
     expanded: bool
 
-    def __init__(self, name, path, parent):
+    def __init__(self, name, path, parent, allowed_files: Optional[Set[str]]):
         super().__init__(name, path, parent)
 
         self.children = []
+        self._allowed = allowed_files
 
         for child in os.listdir(os.path.join(os.getcwd(), path)):
             full_path = os.path.join(path, child)
+
+            # Filter by git-allowed files/directories if enabled
+            if self._allowed is not None:
+                if os.path.isdir(full_path):
+                    prefix = full_path + "/"
+                    if not any(p.startswith(prefix) for p in self._allowed):
+                        continue
+                else:
+                    if full_path not in self._allowed:
+                        continue
+
             if os.path.isdir(full_path):
-                self.children.append(Dir(child, full_path, self))
+                self.children.append(Dir(child, full_path, self, self._allowed))
             else:
                 self.children.append(Node(child, full_path, self))
 
@@ -192,6 +204,11 @@ parser = argparse.ArgumentParser(
 parser.add_argument("--edit", action="store_true", help="Edit .llm_info file")
 parser.add_argument("--notag", action="store_true", help="Don't wrap output in <project> tag")
 parser.add_argument("--nostructure", action="store_true", help="Don't include a project structure tree in the output")
+parser.add_argument(
+    "--all",
+    action="store_true",
+    help="Include all files in the selector, not just git-tracked files",
+)
 args = parser.parse_args()
 
 llm_info_path = ".llm_info"
@@ -206,10 +223,52 @@ if os.path.exists(llm_info_path):
         print(f"Error reading {llm_info_path}: {e}")
         sys.exit(1)
 
-# If .llm_info does not exist, or is empty, or --edit is specified - run interactive selection.
+def get_git_allowed_file_set() -> Optional[Set[str]]:
+    """Return set of files that are either tracked or untracked-but-not-ignored.
+
+    Returns None if not in a git repo or if --all is used.
+    """
+    if args.all:
+        return None
+    try:
+        git_check = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        if git_check.stdout.strip() != "true":
+            return None
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z"], capture_output=True, text=False, check=True
+        )
+        untracked_not_ignored = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+            capture_output=True,
+            text=False,
+            check=True,
+        )
+        parts = []
+        if tracked.stdout:
+            parts.extend(tracked.stdout.split(b"\x00"))
+        if untracked_not_ignored.stdout:
+            parts.extend(untracked_not_ignored.stdout.split(b"\x00"))
+        # filter empties and decode
+        return {p.decode("utf-8") for p in parts if p}
+    except Exception:
+        return None
+
+_allowed_set = get_git_allowed_file_set()
+
+# If a .llm_info exists, filter out any entries that are ignored when filtering is active
+# by keeping only allowed files (tracked or untracked-not-ignored).
+if _allowed_set is not None and selected_files:
+    selected_files = {p for p in selected_files if p in _allowed_set}
+
+# If .llm_info does not exist, or is empty after filtering, or --edit is specified - run interactive selection.
 if len(selected_files) == 0 or args.edit:
 
-    root = Dir(os.path.basename(directory), "", None)
+    root = Dir(os.path.basename(directory), "", None, _allowed_set)
     root.expanded = True
 
     selected_files = curses.wrapper(lambda stdscr: interactive_selector(stdscr, root))

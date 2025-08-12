@@ -15,9 +15,12 @@ git clone https://github.com/FraserLee/synopsis
 cd synopsis
 chmod +x synopsis.py
 
-# Add an alias to the script. For the default shell on macos:
-echo "alias synopsis='$(pwd)/synopsis.py'" >> ~/.zshenv
-source ~/.zshenv
+# Add an alias to the script.
+echo "alias synopsis='$(pwd)/synopsis.py'" >> ~/.zshrc
+source ~/.zshrc
+
+# Add .llm_info to global gitignore.
+echo ".llm_info" >> ~/.gitignore
 ```
 
 ## Usage
@@ -27,6 +30,11 @@ synopsis # copy every file listed in `.llm_info`, wrapped in code blocks, to
          # the clipboard.
 
 synopsis --edit # interactively add and remove files from `.llm_info`
+
+# by default, the interactive selector shows only git-tracked files and hides
+# ignored/untracked files (e.g., __pycache__, build artifacts). Use --all to
+# include everything.
+synopsis --edit --all
 ```
 
 This creates a file, `.llm_info`, which looks like
