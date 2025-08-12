@@ -109,7 +109,7 @@ def interactive_selector(stdscr, root) -> Set[str]:
 
         header = [
             "Use ↑/↓ or j/k to navigate, ←/h to collapse, →/l to expand,",
-            "SPACE to toggle, ENTER to finish, q to quit."
+            "a to select all, SPACE to toggle, ENTER to finish, q to quit."
         ]
         for i, line in enumerate(header):
             stdscr.addstr(i, 0, line[:width-1])
@@ -178,6 +178,12 @@ def interactive_selector(stdscr, root) -> Set[str]:
         elif key == ord(' '):
             node, _ = visible_list[current_index]
             invert(node)
+
+        elif key == ord('a'):
+            # Select all files that are currently visible in the list
+            for n, _ in visible_list:
+                if not isinstance(n, Dir):
+                    n.selected = True
 
         elif key == ord('q'):
             sys.exit(0)
